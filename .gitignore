@@ -9,3 +9,6 @@ models/
 runtime/
 memory-state/
 *.log
+
+# Rust build artifacts
+/target/
