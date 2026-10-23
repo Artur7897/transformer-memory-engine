@@ -186,6 +186,73 @@ It is an entity that can adapt without uncontrolled growth,
 preserve important capabilities without becoming rigid,
 and reorganize its own memory under limited resources.
 
+### Project Background and Research Status
+
+The Transformer Memory Engine is an independent, self-initiated
+open-source research and engineering project.
+
+It is not a university research program, doctoral dissertation,
+commissioned academic study, or institutionally funded initiative.
+
+TME originated from architectural questions encountered during
+the development of OrdiFi, particularly the concept of modular
+Bitcoin UTXO-based AI entities.
+
+In this architecture, a language model is treated from the
+beginning as a replaceable component, rather than as the entity
+itself.
+
+The project draws inspiration from established research in
+cognitive science, neuroscience, adaptive systems, continual
+learning, and artificial memory architectures.
+
+It does not claim to have invented these underlying principles
+or demonstrated superiority over existing approaches.
+
+#### Research Approach and Practical Limitations
+
+Although independently developed, TME aims to apply scientific
+reasoning and experimental discipline wherever feasible.
+
+This includes:
+
+- Explicit and falsifiable research hypotheses.
+- Documented architectural decisions.
+- Reproducible experiments and source code.
+- Comparisons with appropriate baseline systems.
+- Transparent reporting of assumptions and limitations.
+- Documentation of failures and negative results.
+- Revision of architectural decisions when evidence requires it.
+
+The project operates without dedicated research funding,
+institutional laboratory infrastructure, formal academic
+supervision, or guaranteed access to research partnerships.
+
+Consequently, some experiments may not achieve the scale,
+statistical power, methodological breadth, or external
+validation expected of formal academic research.
+
+Where established benchmarks are accessible and practical,
+TME will seek to use them.
+
+Where custom experiments are necessary, their methodology,
+data, evaluation criteria, and limitations should be
+documented to support independent examination and
+reproduction where possible.
+
+Preliminary experimental results will not be presented
+as broadly validated scientific conclusions.
+
+**The objective is not to imitate the institutional appearance
+of academic research, but to apply scientific reasoning and
+experimental discipline within the practical limits of an
+independent open-source project.**
+
+Constructive criticism, independent replication, and
+future collaboration are welcome.
+
+---
+
 #### Central Research Hypothesis
 
 > A model-independent, state-driven memory architecture may
