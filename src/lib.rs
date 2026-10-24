@@ -3,6 +3,7 @@ pub mod context_analysis;
 pub mod contextual_evidence;
 pub mod dynamics;
 pub mod evidence_analysis;
+pub mod evidence_quality;
 pub mod experience;
 pub mod hypotheses;
 pub mod metrics;
