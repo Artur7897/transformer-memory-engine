@@ -80,7 +80,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("Save: {save_ms:.3} ms");
         println!("Load incl. validation: {load_ms:.3} ms");
         println!("Separate validation: {validation_ms:.3} ms");
-        println!("First write / index rebuild: {first_write_ms:.3} ms");
+        println!("First write after load: {first_write_ms:.3} ms");
         println!("Next write: {next_write_ms:.6} ms");
         println!("Integrity: PASS");
         Ok(())

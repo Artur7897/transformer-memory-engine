@@ -432,6 +432,61 @@ mod index_tests {
     }
 
     #[test]
+    fn file_load_prepares_index_and_preserves_json() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+
+        let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "tme-index-load-{}-{unique}.json",
+            std::process::id()
+        ));
+
+        let mut original = fixture();
+        original
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+
+        original.save(&path).unwrap();
+        let loaded_result = Memory::load(&path);
+        let _ = std::fs::remove_file(&path);
+
+        let mut loaded = loaded_result.unwrap();
+
+        assert!(loaded.retention_id_index.is_some());
+        assert_eq!(
+            serde_json::to_value(&original).unwrap(),
+            serde_json::to_value(&loaded).unwrap()
+        );
+
+        assert!(loaded
+            .record_retention_event(event("first", "b", 200))
+            .is_err());
+
+        loaded
+            .record_retention_event(event("second", "b", 200))
+            .unwrap();
+    }
+
+    #[test]
+    fn raw_serde_keeps_lazy_index_behavior() {
+        let mut original = fixture();
+        original
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+
+        let json = serde_json::to_vec(&original).unwrap();
+        let restored: Memory = serde_json::from_slice(&json).unwrap();
+
+        assert!(restored.retention_id_index.is_none());
+        assert_eq!(
+            original.retention_as_of("a", 200).unwrap(),
+            restored.retention_as_of("a", 200).unwrap()
+        );
+    }
+
+    #[test]
     fn cloned_memory_preserves_index_correctness() {
         let mut memory = fixture();
         memory

@@ -209,11 +209,11 @@ impl Memory {
 
     pub fn load(path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        let memory: Self = serde_json::from_slice(&bytes)
+        let mut memory: Self = serde_json::from_slice(&bytes)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         memory
-            .validate_retention_history()
+            .prepare_retention_writes()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         memory
