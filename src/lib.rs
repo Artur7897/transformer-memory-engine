@@ -1,6 +1,7 @@
 pub mod abstraction;
 pub mod context_analysis;
 pub mod contextual_evidence;
+pub mod dependency_audit;
 pub mod dynamics;
 pub mod evidence_analysis;
 pub mod evidence_dependencies;
