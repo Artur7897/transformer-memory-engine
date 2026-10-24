@@ -93,7 +93,7 @@ mod tests {
         }
 
         let mut context = BTreeMap::new();
-        context.insert("market_regime".into(), "volatile".into());
+        context.insert("environment".into(), "variable".into());
         context.insert("timeframe".into(), "5m".into());
 
         let record = ContextualEvidenceRecord {
