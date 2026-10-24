@@ -13,6 +13,7 @@ pub mod graph_integrity;
 pub mod hypotheses;
 pub mod metrics;
 pub mod reflect;
+pub mod retention;
 pub mod slice;
 pub mod temporal_dependencies;
 pub mod validation;
@@ -58,6 +59,8 @@ pub struct Memory {
     pub transitions: BTreeMap<String, TransitionEvidence>,
     #[serde(default)]
     pub token_dynamics: BTreeMap<String, dynamics::TokenDynamics>,
+    #[serde(default)]
+    pub retention_events: BTreeMap<String, Vec<retention::RetentionEvent>>,
     #[serde(default)]
     pub experiences: BTreeMap<String, experience::ExperienceRecord>,
     #[serde(default)]
