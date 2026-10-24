@@ -1,3 +1,11 @@
+pub mod contextual_evidence;
+pub mod dynamics;
+pub mod evidence_analysis;
+pub mod experience;
+pub mod hypotheses;
+pub mod metrics;
+pub mod reflect;
+
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -37,6 +45,12 @@ pub struct Memory {
     pub cycles: u64,
     #[serde(default)]
     pub transitions: BTreeMap<String, TransitionEvidence>,
+    #[serde(default)]
+    pub token_dynamics: BTreeMap<String, dynamics::TokenDynamics>,
+    #[serde(default)]
+    pub experiences: BTreeMap<String, experience::ExperienceRecord>,
+    #[serde(default)]
+    pub contextual_evidence: BTreeMap<String, contextual_evidence::ContextualEvidenceRecord>,
 }
 
 impl Memory {
@@ -55,7 +69,10 @@ impl Memory {
             return Err("State ID already exists".into());
         }
 
-        self.states.insert(token.id.clone(), token);
+        let id = token.id.clone();
+        self.states.insert(id.clone(), token);
+        self.token_dynamics
+            .insert(id, dynamics::TokenDynamics::default());
         Ok(())
     }
 
