@@ -3,6 +3,7 @@ pub mod context_analysis;
 pub mod contextual_evidence;
 pub mod dynamics;
 pub mod evidence_analysis;
+pub mod evidence_dependencies;
 pub mod evidence_quality;
 pub mod experience;
 pub mod hypotheses;
@@ -55,6 +56,8 @@ pub struct Memory {
     pub experiences: BTreeMap<String, experience::ExperienceRecord>,
     #[serde(default)]
     pub contextual_evidence: BTreeMap<String, contextual_evidence::ContextualEvidenceRecord>,
+    #[serde(default)]
+    pub evidence_dependencies: BTreeMap<String, Vec<evidence_dependencies::DependencyLink>>,
 }
 
 impl Memory {
