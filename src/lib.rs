@@ -7,6 +7,7 @@ pub mod experience;
 pub mod hypotheses;
 pub mod metrics;
 pub mod reflect;
+pub mod validation;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
