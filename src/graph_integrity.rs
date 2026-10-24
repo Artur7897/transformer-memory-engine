@@ -143,6 +143,7 @@ mod tests {
         DependencyLink {
             parent_id: parent.into(),
             kind: DependencyKind::DerivedFrom,
+            known_at_unix_ms: None,
         }
     }
 

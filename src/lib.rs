@@ -10,6 +10,7 @@ pub mod graph_integrity;
 pub mod hypotheses;
 pub mod metrics;
 pub mod reflect;
+pub mod temporal_dependencies;
 pub mod validation;
 
 use serde::{Deserialize, Serialize};

@@ -14,6 +14,8 @@ pub enum DependencyKind {
 pub struct DependencyLink {
     pub parent_id: String,
     pub kind: DependencyKind,
+    #[serde(default)]
+    pub known_at_unix_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +93,7 @@ impl Memory {
         links.push(DependencyLink {
             parent_id: parent_id.to_owned(),
             kind,
+            known_at_unix_ms: None,
         });
         links.sort();
         Ok(())
