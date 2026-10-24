@@ -70,6 +70,16 @@ impl Memory {
         Ok(ids)
     }
 
+    /// Prepare the derived ID index for a write-intensive session.
+    ///
+    /// Performs a full integrity check before installing the index.
+    /// Does not alter persistent events or the JSON schema.
+    pub fn prepare_retention_writes(&mut self) -> Result<(), String> {
+        let index = self.build_retention_id_index()?;
+        self.retention_id_index = Some(index);
+        Ok(())
+    }
+
     /// Validate persistent retention records without mutating memory.
     pub fn validate_retention_history(&self) -> Result<(), String> {
         self.build_retention_id_index().map(|_| ())
@@ -339,6 +349,64 @@ mod index_tests {
             .record_retention_event(event("same", "b", 200))
             .is_err());
         assert_eq!(memory.retention_events_for("b"), None);
+    }
+
+    #[test]
+    fn explicit_preparation_preserves_events_and_uniqueness() {
+        let mut memory = fixture();
+        memory
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+
+        let json_before = serde_json::to_value(&memory).unwrap();
+
+        memory.prepare_retention_writes().unwrap();
+
+        assert_eq!(json_before, serde_json::to_value(&memory).unwrap());
+        assert!(memory
+            .record_retention_event(event("first", "b", 200))
+            .is_err());
+
+        memory
+            .record_retention_event(event("second", "b", 200))
+            .unwrap();
+        assert_eq!(memory.retention_events_for("b").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn preparation_rebuilds_index_after_deserialization() {
+        let mut memory = fixture();
+        memory
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+
+        let json = serde_json::to_string(&memory).unwrap();
+        let mut restored: Memory = serde_json::from_str(&json).unwrap();
+
+        assert!(restored.retention_id_index.is_none());
+
+        restored.prepare_retention_writes().unwrap();
+
+        assert!(restored.retention_id_index.is_some());
+        assert!(restored
+            .record_retention_event(event("first", "b", 200))
+            .is_err());
+    }
+
+    #[test]
+    fn preparation_rejects_corrupt_history() {
+        let mut memory = fixture();
+        memory
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+
+        let mut json = serde_json::to_value(&memory).unwrap();
+        json["retention_events"]["b"] = serde_json::json!([event("first", "b", 200)]);
+
+        let mut restored: Memory = serde_json::from_value(json).unwrap();
+
+        assert!(restored.prepare_retention_writes().is_err());
+        assert!(restored.retention_id_index.is_none());
     }
 
     #[test]
