@@ -6,6 +6,7 @@ pub mod evidence_analysis;
 pub mod evidence_dependencies;
 pub mod evidence_quality;
 pub mod experience;
+pub mod graph_integrity;
 pub mod hypotheses;
 pub mod metrics;
 pub mod reflect;
