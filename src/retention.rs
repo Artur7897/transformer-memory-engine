@@ -34,6 +34,55 @@ pub struct RetentionReport {
 }
 
 impl Memory {
+    /// Verify stored retention history and construct an ID lookup index.
+    /// The index is derived; the event history remains authoritative.
+    fn build_retention_id_index(&self) -> Result<std::collections::BTreeSet<String>, String> {
+        let mut ids = std::collections::BTreeSet::new();
+
+        for (token_id, events) in &self.retention_events {
+            if !self.states.contains_key(token_id) {
+                return Err("Retention history refers to unknown token".into());
+            }
+
+            let mut previous_time: Option<i64> = None;
+
+            for event in events {
+                if event.token_id != *token_id {
+                    return Err("Retention event token mismatch".into());
+                }
+
+                if event.id.trim().is_empty() || event.reference.trim().is_empty() {
+                    return Err("Retention ID and reference are required".into());
+                }
+
+                if !ids.insert(event.id.clone()) {
+                    return Err("Duplicate retention event ID".into());
+                }
+
+                if previous_time.is_some_and(|previous| event.attempted_at_unix_ms < previous) {
+                    return Err("Retention history is out of order".into());
+                }
+
+                previous_time = Some(event.attempted_at_unix_ms);
+            }
+        }
+
+        Ok(ids)
+    }
+
+    /// Validate persistent retention records without mutating memory.
+    pub fn validate_retention_history(&self) -> Result<(), String> {
+        self.build_retention_id_index().map(|_| ())
+    }
+
+    /// Read-only access; mutation must use record_retention_event.
+    pub fn retention_events_for(
+        &self,
+        token_id: &str,
+    ) -> Option<&[crate::retention::RetentionEvent]> {
+        self.retention_events.get(token_id).map(Vec::as_slice)
+    }
+
     /// Record an explicitly reported recall attempt.
     /// Does not change activation, stability or relation weights.
     pub fn record_retention_event(&mut self, event: RetentionEvent) -> Result<(), String> {
@@ -45,27 +94,42 @@ impl Memory {
             return Err("Retention ID and reference are required".into());
         }
 
+        // First write after deserialization rebuilds the derived index.
+        // This also validates historical records before accepting writes.
+        if self.retention_id_index.is_none() {
+            self.retention_id_index = Some(self.build_retention_id_index()?);
+        }
+
         if self
-            .retention_events
-            .values()
-            .flatten()
-            .any(|existing| existing.id == event.id)
+            .retention_id_index
+            .as_ref()
+            .expect("index initialized")
+            .contains(&event.id)
         {
             return Err("Retention event ID already exists".into());
         }
 
-        let events = self
+        if let Some(previous) = self
             .retention_events
-            .entry(event.token_id.clone())
-            .or_default();
-
-        if let Some(previous) = events.last() {
+            .get(&event.token_id)
+            .and_then(|events| events.last())
+        {
             if event.attempted_at_unix_ms < previous.attempted_at_unix_ms {
                 return Err("Retention event time is out of order".into());
             }
         }
 
-        events.push(event);
+        let id = event.id.clone();
+        self.retention_events
+            .entry(event.token_id.clone())
+            .or_default()
+            .push(event);
+
+        self.retention_id_index
+            .as_mut()
+            .expect("index initialized")
+            .insert(id);
+
         Ok(())
     }
 
@@ -234,5 +298,122 @@ mod tests {
 
         let older: Memory = serde_json::from_value(legacy).unwrap();
         assert_eq!(older.retention_as_of("concept", 200).unwrap().attempts, 0);
+    }
+}
+
+#[cfg(test)]
+mod index_tests {
+    use super::*;
+    use crate::StateToken;
+
+    fn fixture() -> Memory {
+        let mut memory = Memory::new();
+        for id in ["a", "b"] {
+            memory
+                .insert(StateToken {
+                    id: id.into(),
+                    vector: vec![1.0],
+                })
+                .unwrap();
+        }
+        memory
+    }
+
+    fn event(id: &str, token_id: &str, time: i64) -> RetentionEvent {
+        RetentionEvent {
+            id: id.into(),
+            token_id: token_id.into(),
+            attempted_at_unix_ms: time,
+            outcome: RecallOutcome::Success,
+            reference: format!("test/{id}"),
+        }
+    }
+
+    #[test]
+    fn index_rejects_duplicates_across_tokens() {
+        let mut memory = fixture();
+        memory
+            .record_retention_event(event("same", "a", 100))
+            .unwrap();
+        assert!(memory
+            .record_retention_event(event("same", "b", 200))
+            .is_err());
+        assert_eq!(memory.retention_events_for("b"), None);
+    }
+
+    #[test]
+    fn index_rebuilds_after_serde_roundtrip() {
+        let mut memory = fixture();
+        memory
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+
+        let serialized = serde_json::to_string(&memory).unwrap();
+        assert!(!serialized.contains("retention_id_index"));
+
+        let mut restored: Memory = serde_json::from_str(&serialized).unwrap();
+
+        assert!(restored
+            .record_retention_event(event("first", "b", 200))
+            .is_err());
+
+        restored
+            .record_retention_event(event("second", "b", 200))
+            .unwrap();
+        assert_eq!(restored.retention_events_for("b").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn cloned_memory_preserves_index_correctness() {
+        let mut memory = fixture();
+        memory
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+
+        let mut clone = memory.clone();
+        assert!(clone
+            .record_retention_event(event("first", "b", 200))
+            .is_err());
+
+        clone
+            .record_retention_event(event("second", "b", 200))
+            .unwrap();
+
+        assert!(memory.retention_events_for("b").is_none());
+    }
+
+    #[test]
+    fn corrupted_deserialized_history_blocks_new_writes() {
+        let mut memory = fixture();
+        memory
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+
+        let mut value = serde_json::to_value(&memory).unwrap();
+        let duplicate = serde_json::to_value(event("first", "b", 200)).unwrap();
+
+        value["retention_events"]["b"] = serde_json::json!([duplicate]);
+
+        let mut restored: Memory = serde_json::from_value(value).unwrap();
+
+        assert!(restored.validate_retention_history().is_err());
+        assert!(restored
+            .record_retention_event(event("new", "b", 300))
+            .is_err());
+    }
+
+    #[test]
+    fn invalid_insertion_does_not_change_history() {
+        let mut memory = fixture();
+        memory
+            .record_retention_event(event("first", "a", 100))
+            .unwrap();
+        let before = serde_json::to_value(&memory).unwrap();
+
+        assert!(memory
+            .record_retention_event(event("older", "a", 50))
+            .is_err());
+
+        assert_eq!(before, serde_json::to_value(&memory).unwrap());
     }
 }

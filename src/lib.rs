@@ -20,7 +20,7 @@ pub mod temporal_dependencies;
 pub mod validation;
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -61,7 +61,9 @@ pub struct Memory {
     #[serde(default)]
     pub token_dynamics: BTreeMap<String, dynamics::TokenDynamics>,
     #[serde(default)]
-    pub retention_events: BTreeMap<String, Vec<retention::RetentionEvent>>,
+    pub(crate) retention_events: BTreeMap<String, Vec<retention::RetentionEvent>>,
+    #[serde(skip)]
+    pub(crate) retention_id_index: Option<BTreeSet<String>>,
     #[serde(default)]
     pub experiences: BTreeMap<String, experience::ExperienceRecord>,
     #[serde(default)]
@@ -208,6 +210,10 @@ impl Memory {
     pub fn load(path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
         let memory: Self = serde_json::from_slice(&bytes)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        memory
+            .validate_retention_history()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         memory
