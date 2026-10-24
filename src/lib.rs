@@ -14,6 +14,7 @@ pub mod hypotheses;
 pub mod metrics;
 pub mod reflect;
 pub mod retention;
+pub mod retention_analysis;
 pub mod slice;
 pub mod temporal_dependencies;
 pub mod validation;
