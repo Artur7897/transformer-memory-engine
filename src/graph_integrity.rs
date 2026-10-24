@@ -39,6 +39,23 @@ impl Memory {
                     return Err(format!("Dependency parent is missing: {}", link.parent_id));
                 }
 
+                if let Some(known_at) = link.known_at_unix_ms {
+                    let child_record = self
+                        .contextual_evidence
+                        .get(child)
+                        .ok_or("Missing dependency child")?;
+                    let parent_record = self
+                        .contextual_evidence
+                        .get(&link.parent_id)
+                        .ok_or("Missing dependency parent")?;
+
+                    if known_at < child_record.available_at_unix_ms
+                        || known_at < parent_record.available_at_unix_ms
+                    {
+                        return Err(format!("Dependency knowledge predates evidence: {child}"));
+                    }
+                }
+
                 if child == &link.parent_id {
                     return Err(format!("Self dependency: {child}"));
                 }
@@ -222,5 +239,118 @@ mod tests {
         let restored: Memory = serde_json::from_value(legacy).unwrap();
 
         assert!(restored.validate_evidence_graph().unwrap().valid);
+    }
+}
+
+#[cfg(test)]
+mod load_integrity_tests {
+    use crate::{
+        contextual_evidence::{ContextualEvidenceRecord, CONTEXTUAL_EVIDENCE_SCHEMA_VERSION},
+        evidence_dependencies::{DependencyKind, DependencyLink},
+        experience::EvidenceSource,
+        Memory, StateToken,
+    };
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
+
+    fn fixture() -> Memory {
+        let mut m = Memory::new();
+        for id in ["input", "output"] {
+            m.insert(StateToken {
+                id: id.into(),
+                vector: vec![1.0, 0.0],
+            })
+            .unwrap();
+        }
+        for id in ["a", "b"] {
+            m.record_contextual_evidence(ContextualEvidenceRecord {
+                schema_version: CONTEXTUAL_EVIDENCE_SCHEMA_VERSION,
+                id: id.into(),
+                from: "input".into(),
+                to: "output".into(),
+                occurred: true,
+                observed_at_unix_ms: 0,
+                available_at_unix_ms: 10,
+                source: EvidenceSource::ExternalObservation,
+                reference: format!("test/{id}"),
+                context: BTreeMap::new(),
+            })
+            .unwrap();
+        }
+        m
+    }
+
+    fn load_test(memory: &Memory) -> std::io::Result<Memory> {
+        let serial = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "tme-load-integrity-{}-{serial}.json",
+            std::process::id()
+        ));
+
+        fs::write(&path, serde_json::to_vec(memory)?)?;
+        let result = Memory::load(&path);
+        let _ = fs::remove_file(&path);
+        result
+    }
+
+    #[test]
+    fn load_accepts_valid_graph() {
+        let mut m = fixture();
+        m.record_timed_evidence_dependency("b", "a", DependencyKind::CopiedFrom, 20)
+            .unwrap();
+
+        let restored = load_test(&m).unwrap();
+        assert_eq!(
+            restored
+                .evidence_dependency_report("b")
+                .unwrap()
+                .ancestor_ids,
+            vec!["a"]
+        );
+    }
+
+    #[test]
+    fn load_rejects_corrupt_graph() {
+        let mut m = fixture();
+
+        m.evidence_dependencies.insert(
+            "a".into(),
+            vec![DependencyLink {
+                parent_id: "b".into(),
+                kind: DependencyKind::DerivedFrom,
+                known_at_unix_ms: None,
+            }],
+        );
+        m.evidence_dependencies.insert(
+            "b".into(),
+            vec![DependencyLink {
+                parent_id: "a".into(),
+                kind: DependencyKind::DerivedFrom,
+                known_at_unix_ms: None,
+            }],
+        );
+
+        let error = load_test(&m).err().unwrap();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn load_rejects_impossible_dependency_time() {
+        let mut m = fixture();
+
+        m.evidence_dependencies.insert(
+            "b".into(),
+            vec![DependencyLink {
+                parent_id: "a".into(),
+                kind: DependencyKind::CopiedFrom,
+                known_at_unix_ms: Some(5),
+            }],
+        );
+
+        let error = load_test(&m).err().unwrap();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 }

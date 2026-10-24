@@ -199,7 +199,14 @@ impl Memory {
 
     pub fn load(path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        serde_json::from_slice(&bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        let memory: Self = serde_json::from_slice(&bytes)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        memory
+            .validate_evidence_graph()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        Ok(memory)
     }
 }
 
