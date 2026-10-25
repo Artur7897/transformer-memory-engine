@@ -1,6 +1,7 @@
 pub mod abstraction;
 pub mod adaptive_dynamics;
 pub mod compress;
+pub mod consolidation_preview;
 pub mod context_analysis;
 pub mod contextual_evidence;
 pub mod dependency_audit;
