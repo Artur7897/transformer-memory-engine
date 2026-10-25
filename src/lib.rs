@@ -13,6 +13,7 @@ pub mod experience;
 pub mod graph_integrity;
 pub mod hypotheses;
 pub mod metrics;
+pub mod processing;
 pub mod reflect;
 pub mod retention;
 pub mod retention_analysis;
