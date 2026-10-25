@@ -237,6 +237,12 @@ fn main() -> Result<(), String> {
         );
     }
     println!("Explicit simulated updates; no automatic decay or Sleep.");
+
+    println!("\nTME Coupled Retrieval v0.8");
+    let (activation_a, activation_b, record_a, record_b) = coupled_retrieval_probe()?;
+    println!("client_a={} activation={:.4}", record_a, activation_a);
+    println!("client_b={} activation={:.4}", record_b, activation_b);
+    println!("Activation is diagnostic; relations select the records.");
     Ok(())
 }
 
@@ -372,6 +378,96 @@ mod adaptive_replay_tests {
         assert_eq!(
             adaptive_trace(false).unwrap().2,
             adaptive_trace(true).unwrap().2
+        );
+    }
+}
+
+// v0.8: Dynamics and retrieval share one actual Memory instance.
+// Activation is observed, not used as a truth or ranking score.
+fn coupled_retrieval_probe() -> Result<(f32, f32, String, String), String> {
+    use transformer_memory_engine::{
+        adaptive_dynamics::{AdaptiveEvent, AdaptivePolicy},
+        processing::RetrievalDecision,
+    };
+
+    let mut memory = Memory::new();
+
+    for (id, vector) in [
+        ("client_a", vec![0.0, 1.0]),
+        ("client_b", vec![0.0, 1.0]),
+        ("record_a", vec![1.0, 0.0]),
+        ("record_b", vec![0.6, 0.8]),
+    ] {
+        memory.insert(StateToken {
+            id: id.into(),
+            vector,
+        })?;
+    }
+
+    memory.reinforce("client_a", "record_a", 1.0)?;
+    memory.reinforce("client_b", "record_b", 1.0)?;
+
+    memory.set_token_dynamics("record_a", 0.2, 0.8)?;
+    memory.set_token_dynamics("record_b", 0.8, 0.1)?;
+
+    let policy = AdaptivePolicy {
+        use_gain: 0.5,
+        review_decay: 0.5,
+    };
+
+    // Apply explicit events to the SAME memory used for retrieval.
+    for (id, event) in [
+        ("record_a", AdaptiveEvent::Use),
+        ("record_a", AdaptiveEvent::ConsolidationReview),
+        ("record_b", AdaptiveEvent::ConsolidationReview),
+        ("record_a", AdaptiveEvent::Use),
+    ] {
+        if event == AdaptiveEvent::Use {
+            memory.record_token_operation(id)?;
+        }
+
+        let preview = memory.adaptive_dynamics_preview(id, event, policy)?;
+        memory.set_token_dynamics(id, preview.activation_after, preview.retention_stability)?;
+    }
+
+    let query = [1.0, 0.0];
+
+    let read = |anchor| -> Result<(String, f32), String> {
+        match memory.process_retrieval_linked(&query, anchor, 100)? {
+            RetrievalDecision::Found(candidate) => Ok((candidate.token_id, candidate.activation)),
+            _ => Err(format!("No unique retrieval for {anchor}")),
+        }
+    };
+
+    let (id_a, activation_a) = read("client_a")?;
+    let (id_b, activation_b) = read("client_b")?;
+
+    Ok((activation_a, activation_b, id_a, id_b))
+}
+
+#[cfg(test)]
+mod coupled_retrieval_tests {
+    use super::*;
+
+    #[test]
+    fn adaptive_states_are_visible_during_retrieval() {
+        let (a, b, _, _) = coupled_retrieval_probe().unwrap();
+        assert!((a - 0.77).abs() < 1e-6);
+        assert!((b - 0.44).abs() < 1e-6);
+    }
+
+    #[test]
+    fn context_association_survives_activation_changes() {
+        let (_, _, a, b) = coupled_retrieval_probe().unwrap();
+        assert_eq!(a, "record_a");
+        assert_eq!(b, "record_b");
+    }
+
+    #[test]
+    fn combined_processing_is_deterministic() {
+        assert_eq!(
+            coupled_retrieval_probe().unwrap(),
+            coupled_retrieval_probe().unwrap()
         );
     }
 }
