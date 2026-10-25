@@ -227,6 +227,16 @@ fn main() -> Result<(), String> {
     let correct = report.probes.iter().filter(|p| p.correct).count();
     println!("Contextual Top-1: {correct}/{}", report.probes.len());
     println!("This is an integration fixture, not a quality benchmark.");
+
+    println!("\nTME Adaptive Dynamics v0.7");
+    for adaptive in [false, true] {
+        let (a, b, uses) = adaptive_trace(adaptive)?;
+        println!(
+            "adaptive={} record_a={:.4} record_b={:.4} uses={}",
+            adaptive, a, b, uses
+        );
+    }
+    println!("Explicit simulated updates; no automatic decay or Sleep.");
     Ok(())
 }
 
@@ -270,5 +280,98 @@ mod tests {
         let report = replay(&events).unwrap();
         assert_eq!(report.probes[1].contextual, None);
         assert!(!report.probes[1].correct);
+    }
+}
+
+// Experimental extension of the integrated replay.
+// Both branches process the same scheduled events.
+// The adaptive branch explicitly applies core preview results.
+fn adaptive_trace(adaptive: bool) -> Result<(f32, f32, u64), String> {
+    use transformer_memory_engine::adaptive_dynamics::{AdaptiveEvent, AdaptivePolicy};
+
+    let policy = AdaptivePolicy {
+        use_gain: 0.5,
+        review_decay: 0.5,
+    };
+
+    let mut memory = Memory::new();
+
+    for (id, activation, stability) in [("record_a", 0.2, 0.8), ("record_b", 0.8, 0.1)] {
+        memory.insert(StateToken {
+            id: id.into(),
+            vector: vec![1.0, 0.0],
+        })?;
+        memory.set_token_dynamics(id, activation, stability)?;
+    }
+
+    let events = [
+        (30_u32, "record_a", AdaptiveEvent::Use),
+        (100, "record_a", AdaptiveEvent::ConsolidationReview),
+        (100, "record_b", AdaptiveEvent::ConsolidationReview),
+        (365, "record_a", AdaptiveEvent::Use),
+    ];
+
+    let mut uses = 0_u64;
+
+    for (_day, id, event) in events {
+        if event == AdaptiveEvent::Use {
+            memory.record_token_operation(id)?;
+            uses += 1;
+        }
+
+        if adaptive {
+            let preview = memory.adaptive_dynamics_preview(id, event, policy)?;
+
+            // Simulator-only explicit application.
+            // This is NOT an automatic production commit.
+            memory.set_token_dynamics(id, preview.activation_after, preview.retention_stability)?;
+        }
+    }
+
+    let a = memory.dynamics("record_a").ok_or("Missing record_a")?;
+    let b = memory.dynamics("record_b").ok_or("Missing record_b")?;
+
+    if a.operations != uses || b.operations != 0 {
+        return Err("Operation counts differ from event history".into());
+    }
+
+    Ok((a.activation, b.activation, uses))
+}
+
+#[cfg(test)]
+mod adaptive_replay_tests {
+    use super::*;
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    #[test]
+    fn baseline_does_not_modify_activation() {
+        let (a, b, uses) = adaptive_trace(false).unwrap();
+        assert!(close(a, 0.2));
+        assert!(close(b, 0.8));
+        assert_eq!(uses, 2);
+    }
+
+    #[test]
+    fn adaptive_policy_changes_activation_as_expected() {
+        let (a, b, uses) = adaptive_trace(true).unwrap();
+        assert!(close(a, 0.77));
+        assert!(close(b, 0.44));
+        assert_eq!(uses, 2);
+    }
+
+    #[test]
+    fn adaptive_trace_is_deterministic() {
+        assert_eq!(adaptive_trace(true).unwrap(), adaptive_trace(true).unwrap());
+    }
+
+    #[test]
+    fn adaptive_and_baseline_use_same_operation_count() {
+        assert_eq!(
+            adaptive_trace(false).unwrap().2,
+            adaptive_trace(true).unwrap().2
+        );
     }
 }
