@@ -304,6 +304,16 @@ fn main() -> Result<(), String> {
         println!("  client_a={} client_b={}", trace.linked_a, trace.linked_b);
     }
     println!("Same event history; fixed adaptive policy; no automatic Sleep.");
+
+    println!("\nTME Contextual Reflect v1.0");
+    for cutoff in [20, 30, 40] {
+        let (records, mixed, review) = conflict_reflect_trace(cutoff)?;
+        println!(
+            "cutoff={} records={} mixed={:?} review_required={}",
+            cutoff, records, mixed, review
+        );
+    }
+    println!("Descriptive evidence review; no memory mutation.");
     Ok(())
 }
 
@@ -651,5 +661,99 @@ mod unified_replay_tests {
         let mut events = unified_scenario();
         events.reverse();
         assert!(replay_with_mode(&events, true).is_err());
+    }
+}
+
+// v1.0: Contextual conflict review using existing Memory APIs.
+// No inferred truth, automatic correction, or consolidation.
+fn conflict_reflect_trace(cutoff: i64) -> Result<(usize, Vec<String>, bool), String> {
+    use transformer_memory_engine::contextual_evidence::{
+        ContextualEvidenceRecord, CONTEXTUAL_EVIDENCE_SCHEMA_VERSION,
+    };
+    use transformer_memory_engine::experience::EvidenceSource;
+
+    let mut memory = Memory::new();
+
+    for id in ["event", "outcome"] {
+        memory.insert(StateToken {
+            id: id.into(),
+            vector: vec![1.0, 0.0],
+        })?;
+    }
+
+    // Explicit event schedule. Availability controls historical reads.
+    for (id, occurred, available, context) in [
+        ("positive_a", true, 10, "normal"),
+        ("positive_b", true, 20, "special"),
+        ("negative_a", false, 30, "normal"),
+        ("negative_b", false, 40, "special"),
+    ] {
+        memory.record_contextual_evidence(ContextualEvidenceRecord {
+            schema_version: CONTEXTUAL_EVIDENCE_SCHEMA_VERSION,
+            id: id.into(),
+            from: "event".into(),
+            to: "outcome".into(),
+            occurred,
+            observed_at_unix_ms: available,
+            available_at_unix_ms: available,
+            source: EvidenceSource::ExternalObservation,
+            reference: format!("synthetic/{id}"),
+            context: BTreeMap::from([("mode".into(), context.into())]),
+        })?;
+    }
+
+    let before = serde_json::to_value(&memory).map_err(|error| error.to_string())?;
+
+    let report = memory.reflect_contextual_as_of("event", "outcome", "mode", cutoff)?;
+
+    let after = serde_json::to_value(&memory).map_err(|error| error.to_string())?;
+
+    if before != after || report.memory_changed {
+        return Err("Reflect unexpectedly modified memory".into());
+    }
+
+    Ok((
+        report.evidence_quality.total_records,
+        report.mixed_context_values,
+        report.review_required,
+    ))
+}
+
+#[cfg(test)]
+mod conflict_reflect_tests {
+    use super::*;
+
+    #[test]
+    fn positive_evidence_alone_needs_no_mixed_review() {
+        assert_eq!(conflict_reflect_trace(20).unwrap(), (2, vec![], false));
+    }
+
+    #[test]
+    fn opposite_result_in_same_context_requires_review() {
+        assert_eq!(
+            conflict_reflect_trace(30).unwrap(),
+            (3, vec!["normal".into()], true)
+        );
+    }
+
+    #[test]
+    fn both_contexts_can_be_mixed() {
+        assert_eq!(
+            conflict_reflect_trace(40).unwrap(),
+            (4, vec!["normal".into(), "special".into()], true)
+        );
+    }
+
+    #[test]
+    fn unavailable_evidence_is_not_used_early() {
+        assert_eq!(conflict_reflect_trace(29).unwrap(), (2, vec![], false));
+    }
+
+    #[test]
+    fn conflict_reflection_is_deterministic() {
+        assert_eq!(
+            conflict_reflect_trace(40).unwrap(),
+            conflict_reflect_trace(40).unwrap()
+        );
     }
 }
