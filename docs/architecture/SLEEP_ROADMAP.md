@@ -1,21 +1,25 @@
-# TME — State-Driven Sleep Architecture
+# TME — Reflect and Idle-Driven Sleep Roadmap
 
 Status: TARGET DEFINED / IMPLEMENTATION IN PROGRESS
 
 ## Architectural principle
 
-TME uses a state-driven internal processing rhythm.
+Reflect performs event-driven, resource-bounded analysis
+during agent activity.
 
-Sleep is an autonomous memory consolidation mode,
-not a timer, scheduled task, or fixed operation counter.
+Sleep runs during idle periods when relevant memory
+or calibration revisions require examination.
+It is not driven by a timer, a fixed operation counter,
+or a separate consolidation-demand threshold.
+Sleep preparation is interruptible and has no fixed deadline.
 
 No independent language acquisition in the initial TME.
 
 ## Sleep objective
 
-Sleep selectively reorganizes existing memory by combining:
-
-- Reflect: inspect evidence, conflicts and inconsistencies.
+Reflect identifies local findings and consolidation candidates.
+Sleep verifies those findings and coordinates shared mechanisms,
+including:
 - Abstract: derive reusable patterns from experiences.
 - Compress: reduce redundancy while preserving information.
 - Slice: separate ambiguous or overloaded states.
@@ -26,18 +30,18 @@ Newly inferred relationships remain hypotheses until validated.
 
 Original evidence and provenance must remain recoverable.
 
-## Trigger objective
+## Scheduling and revision objective
 
-Sleep is initiated by internal consolidation demand,
-potentially including:
+The agent runtime identifies idle periods.
+Sleep may begin when memory or calibration revisions
+have not yet been examined.
 
-- unresolved contradictions,
-- excessive redundancy,
-- unintegrated experiences,
-- competing state representations,
-- accumulated uncertainty or instability.
+Reflect records local findings during active operation.
+A completed no-change analysis is still recorded as examined.
+Unchanged revisions must not cause endless reanalysis.
 
-Trigger rules must be experimentally validated.
+New agent work interrupts Sleep preparation.
+Pending changes require revision validation before commit.
 
 ## Engineering requirements
 
@@ -61,8 +65,10 @@ Trigger rules must be experimentally validated.
 - [ ] M07 — Slice
 - [ ] M08 — Operation-driven adaptive decay
 - [ ] M09 — Integrated deterministic consolidation
-- [ ] M10 — Autonomous state-driven Sleep trigger
-- [ ] M11 — Long-horizon tests and model independence
+- [ ] M10 — Event-driven Reflect and revision tracking
+- [ ] M11 — Interruptible idle-driven Sleep
+- [ ] M12 — Atomic consolidation and recovery
+- [ ] M13 — Calibration simulation and long-horizon tests
 
 M01/M02 are basic implementations, not complete
 validation of the final memory architecture.
@@ -71,7 +77,7 @@ validation of the final memory architecture.
 
 Sleep is not complete until:
 
-1. Its trigger depends on internal state.
+1. Its execution respects idle availability and revisions.
 2. It can coordinate the defined memory operations.
 3. It preserves source evidence and provenance.
 4. It can generate and distinguish tentative hypotheses.
