@@ -54,20 +54,45 @@ impl Memory {
             return Err("Query vector must be nonzero".into());
         }
 
+        // Relation keys are JSON-serialized (from, to) pairs.
+        // Serialize an empty second component, then remove its
+        // closing quote and bracket to obtain the exact pair prefix.
+        let encoded_prefix = serde_json::to_string(&(anchor, "")).map_err(|e| e.to_string())?;
+
+        let prefix = encoded_prefix
+            .strip_suffix("\"]")
+            .ok_or("Unexpected relation key encoding")?;
+
         let mut ids = BTreeSet::new();
 
-        for relation in self.relations.values() {
-            if relation.from == anchor && relation.weight > 0.0 {
-                if relation.to == anchor {
-                    continue;
-                }
-
-                if !self.states.contains_key(&relation.to) {
-                    return Err("Relation references unknown token".into());
-                }
-
-                ids.insert(relation.to.as_str());
+        for (key, relation) in self
+            .relations
+            .range(prefix.to_owned()..)
+            .take_while(|(key, _)| key.starts_with(prefix))
+        {
+            // Do not trust a stored relation merely because its
+            // map key matched the encoded prefix.
+            if relation.from != anchor || relation.weight <= 0.0 {
+                continue;
             }
+
+            if relation.to == anchor {
+                continue;
+            }
+
+            let expected_key =
+                serde_json::to_string(&(relation.from.as_str(), relation.to.as_str()))
+                    .map_err(|e| e.to_string())?;
+
+            if *key != expected_key {
+                return Err("Relation key does not match its fields".into());
+            }
+
+            if !self.states.contains_key(&relation.to) {
+                return Err("Relation references unknown token".into());
+            }
+
+            ids.insert(relation.to.as_str());
         }
 
         if ids.is_empty() {
@@ -505,6 +530,77 @@ mod tests {
         assert!(memory
             .process_retrieval_linked(&[1.0, 0.0], "unknown", 100)
             .is_err());
+    }
+
+    #[test]
+    fn linked_range_handles_special_character_anchors() {
+        for anchor in [
+            "customer",
+            "customer_extra",
+            "customer\"quoted",
+            "customer\\path",
+            "kunde_ö_日本",
+        ] {
+            let mut memory = Memory::new();
+
+            for id in [anchor, "target", "other"] {
+                memory
+                    .insert(crate::StateToken {
+                        id: id.into(),
+                        vector: vec![1.0, 0.0],
+                    })
+                    .unwrap();
+            }
+
+            memory.reinforce(anchor, "target", 1.0).unwrap();
+
+            let result = memory
+                .process_retrieval_linked(&[1.0, 0.0], anchor, 100)
+                .unwrap();
+
+            assert!(
+                matches!(
+                    result,
+                    RetrievalDecision::Found(candidate)
+                        if candidate.token_id == "target"
+                ),
+                "Failed for anchor {anchor:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn linked_range_does_not_confuse_similar_anchors() {
+        let mut memory = Memory::new();
+
+        for id in ["a", "ab", "a\"b", "target_a", "target_ab"] {
+            memory
+                .insert(crate::StateToken {
+                    id: id.into(),
+                    vector: vec![1.0, 0.0],
+                })
+                .unwrap();
+        }
+
+        memory.reinforce("a", "target_a", 1.0).unwrap();
+        memory.reinforce("ab", "target_ab", 1.0).unwrap();
+
+        for (anchor, expected) in [("a", "target_a"), ("ab", "target_ab")] {
+            assert!(matches!(
+                memory.process_retrieval_linked(
+                    &[1.0, 0.0], anchor, 100
+                ).unwrap(),
+                RetrievalDecision::Found(candidate)
+                    if candidate.token_id == expected
+            ));
+        }
+
+        assert_eq!(
+            memory
+                .process_retrieval_linked(&[1.0, 0.0], "a\"b", 100)
+                .unwrap(),
+            RetrievalDecision::NotFound
+        );
     }
 
     #[test]
