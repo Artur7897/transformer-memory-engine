@@ -10,6 +10,8 @@ enum Event {
     Learn(&'static str, [f32; 2]),
     Link(&'static str, &'static str),
     Activation(&'static str, f32),
+    Dynamics(&'static str, f32, f32),
+    Review(&'static str),
     Use(&'static str),
     Evidence(&'static str, &'static str, bool),
     Probe(&'static str, &'static str),
@@ -104,6 +106,17 @@ fn relation_exists(memory: &Memory, from: &str, to: &str) -> Result<bool, String
 }
 
 fn replay(events: &[TimedEvent]) -> Result<Report, String> {
+    replay_with_mode(events, false).map(|(report, _)| report)
+}
+
+fn replay_with_mode(events: &[TimedEvent], adaptive: bool) -> Result<(Report, Memory), String> {
+    use transformer_memory_engine::adaptive_dynamics::{AdaptiveEvent, AdaptivePolicy};
+
+    let policy = AdaptivePolicy {
+        use_gain: 0.5,
+        review_decay: 0.5,
+    };
+
     let mut memory = Memory::new();
     let mut last_day = None;
     let mut recorded_uses = 0;
@@ -129,9 +142,38 @@ fn replay(events: &[TimedEvent]) -> Result<Report, String> {
                 let stability = memory.dynamics(id).ok_or("Unknown token")?.stability;
                 memory.set_token_dynamics(id, *activation, stability)?;
             }
+            Event::Dynamics(id, activation, stability) => {
+                memory.set_token_dynamics(id, *activation, *stability)?;
+            }
+            Event::Review(id) => {
+                if adaptive {
+                    let preview = memory.adaptive_dynamics_preview(
+                        id,
+                        AdaptiveEvent::ConsolidationReview,
+                        policy,
+                    )?;
+                    memory.set_token_dynamics(
+                        id,
+                        preview.activation_after,
+                        preview.retention_stability,
+                    )?;
+                } else if memory.dynamics(id).is_none() {
+                    return Err("Unknown review token".into());
+                }
+            }
             Event::Use(id) => {
                 memory.record_token_operation(id)?;
                 recorded_uses += 1;
+
+                if adaptive {
+                    let preview =
+                        memory.adaptive_dynamics_preview(id, AdaptiveEvent::Use, policy)?;
+                    memory.set_token_dynamics(
+                        id,
+                        preview.activation_after,
+                        preview.retention_stability,
+                    )?;
+                }
             }
             Event::Evidence(from, to, occurred) => {
                 memory.record_contextual_evidence(ContextualEvidenceRecord {
@@ -203,11 +245,14 @@ fn replay(events: &[TimedEvent]) -> Result<Report, String> {
 
     memory.validate_evidence_graph()?;
 
-    Ok(Report {
-        events: events.len(),
-        recorded_uses,
-        probes,
-    })
+    Ok((
+        Report {
+            events: events.len(),
+            recorded_uses,
+            probes,
+        },
+        memory,
+    ))
 }
 
 fn main() -> Result<(), String> {
@@ -243,6 +288,22 @@ fn main() -> Result<(), String> {
     println!("client_a={} activation={:.4}", record_a, activation_a);
     println!("client_b={} activation={:.4}", record_b, activation_b);
     println!("Activation is diagnostic; relations select the records.");
+
+    println!("\nTME Unified Event Replay v0.9");
+    for adaptive in [false, true] {
+        let trace = unified_trace(adaptive)?;
+        println!(
+            "adaptive={} record_a={:.4} record_b={:.4} uses={} contextual={}/{}",
+            adaptive,
+            trace.activation_a,
+            trace.activation_b,
+            trace.recorded_uses,
+            trace.contextual_correct,
+            trace.probes,
+        );
+        println!("  client_a={} client_b={}", trace.linked_a, trace.linked_b);
+    }
+    println!("Same event history; fixed adaptive policy; no automatic Sleep.");
     Ok(())
 }
 
@@ -469,5 +530,126 @@ mod coupled_retrieval_tests {
             coupled_retrieval_probe().unwrap(),
             coupled_retrieval_probe().unwrap()
         );
+    }
+}
+
+// v0.9: A single chronological stream drives one Memory per run.
+// Baseline and adaptive modes differ only in explicit policy application.
+fn unified_scenario() -> Vec<TimedEvent> {
+    let mut events = scenario();
+
+    for timed in &mut events {
+        timed.action = match timed.action.clone() {
+            Event::Activation("record_a", _) => Event::Dynamics("record_a", 0.2, 0.8),
+            Event::Activation("record_b", _) => Event::Dynamics("record_b", 0.8, 0.1),
+            other => other,
+        };
+    }
+
+    events.extend([
+        TimedEvent {
+            day: 90,
+            action: Event::Review("record_a"),
+        },
+        TimedEvent {
+            day: 180,
+            action: Event::Review("record_b"),
+        },
+        TimedEvent {
+            day: 200,
+            action: Event::Use("record_a"),
+        },
+    ]);
+
+    events.sort_by_key(|event| event.day);
+    events
+}
+
+#[derive(Debug, PartialEq)]
+struct UnifiedTrace {
+    activation_a: f32,
+    activation_b: f32,
+    recorded_uses: u64,
+    contextual_correct: usize,
+    probes: usize,
+    linked_a: String,
+    linked_b: String,
+}
+
+fn unified_trace(adaptive: bool) -> Result<UnifiedTrace, String> {
+    use transformer_memory_engine::processing::RetrievalDecision;
+
+    let (report, memory) = replay_with_mode(&unified_scenario(), adaptive)?;
+
+    let resolve = |anchor| -> Result<String, String> {
+        match memory.process_retrieval_linked(&[1.0, 0.0], anchor, 365 * 86_400_000)? {
+            RetrievalDecision::Found(candidate) => Ok(candidate.token_id),
+            _ => Err(format!("No unique relation for {anchor}")),
+        }
+    };
+
+    let a = memory.dynamics("record_a").ok_or("Missing record_a")?;
+    let b = memory.dynamics("record_b").ok_or("Missing record_b")?;
+
+    Ok(UnifiedTrace {
+        activation_a: a.activation,
+        activation_b: b.activation,
+        recorded_uses: report.recorded_uses,
+        contextual_correct: report.probes.iter().filter(|probe| probe.correct).count(),
+        probes: report.probes.len(),
+        linked_a: resolve("client_a")?,
+        linked_b: resolve("client_b")?,
+    })
+}
+
+#[cfg(test)]
+mod unified_replay_tests {
+    use super::*;
+
+    #[test]
+    fn identical_event_history_for_both_modes() {
+        let baseline = unified_trace(false).unwrap();
+        let adaptive = unified_trace(true).unwrap();
+
+        assert_eq!(baseline.recorded_uses, 2);
+        assert_eq!(baseline.recorded_uses, adaptive.recorded_uses);
+        assert_eq!(baseline.probes, adaptive.probes);
+    }
+
+    #[test]
+    fn baseline_keeps_initial_activation() {
+        let trace = unified_trace(false).unwrap();
+        assert!((trace.activation_a - 0.2).abs() < 1e-6);
+        assert!((trace.activation_b - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn adaptive_events_change_activation() {
+        let trace = unified_trace(true).unwrap();
+        assert!((trace.activation_a - 0.59).abs() < 1e-6);
+        assert!((trace.activation_b - 0.495).abs() < 1e-6);
+    }
+
+    #[test]
+    fn both_modes_keep_correct_context_relations() {
+        for adaptive in [false, true] {
+            let trace = unified_trace(adaptive).unwrap();
+            assert_eq!(trace.linked_a, "record_a");
+            assert_eq!(trace.linked_b, "record_b");
+            assert_eq!(trace.contextual_correct, 2);
+            assert_eq!(trace.probes, 2);
+        }
+    }
+
+    #[test]
+    fn unified_replay_is_deterministic() {
+        assert_eq!(unified_trace(true).unwrap(), unified_trace(true).unwrap());
+    }
+
+    #[test]
+    fn unified_replay_rejects_reversed_timeline() {
+        let mut events = unified_scenario();
+        events.reverse();
+        assert!(replay_with_mode(&events, true).is_err());
     }
 }
