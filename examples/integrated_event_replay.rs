@@ -14,6 +14,8 @@ enum Event {
     Review(&'static str),
     Use(&'static str),
     Evidence(&'static str, &'static str, bool),
+    ContextEvidence(&'static str, &'static str, bool, &'static str),
+    ReflectProbe(&'static str, &'static str, &'static str),
     Probe(&'static str, &'static str),
 }
 
@@ -35,10 +37,19 @@ struct Probe {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+struct LifecycleReflectProbe {
+    day: u32,
+    total_records: usize,
+    mixed_context_values: Vec<String>,
+    review_required: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 struct Report {
     events: usize,
     recorded_uses: u64,
     probes: Vec<Probe>,
+    reflect_probes: Vec<LifecycleReflectProbe>,
 }
 
 fn scenario() -> Vec<TimedEvent> {
@@ -121,6 +132,7 @@ fn replay_with_mode(events: &[TimedEvent], adaptive: bool) -> Result<(Report, Me
     let mut last_day = None;
     let mut recorded_uses = 0;
     let mut probes = Vec::new();
+    let mut reflect_probes = Vec::new();
 
     for (index, timed) in events.iter().enumerate() {
         if last_day.is_some_and(|day| timed.day < day) {
@@ -189,6 +201,32 @@ fn replay_with_mode(events: &[TimedEvent], adaptive: bool) -> Result<(Report, Me
                     context: BTreeMap::new(),
                 })?;
             }
+            Event::ContextEvidence(from, to, occurred, mode) => {
+                let timestamp = i64::from(timed.day) * 86_400_000;
+                memory.record_contextual_evidence(ContextualEvidenceRecord {
+                    schema_version: CONTEXTUAL_EVIDENCE_SCHEMA_VERSION,
+                    id: format!("context-evidence-{index}"),
+                    from: (*from).into(),
+                    to: (*to).into(),
+                    occurred: *occurred,
+                    observed_at_unix_ms: timestamp,
+                    available_at_unix_ms: timestamp,
+                    source: EvidenceSource::ExternalObservation,
+                    reference: format!("synthetic/context/{index}"),
+                    context: BTreeMap::from([("mode".into(), (*mode).into())]),
+                })?;
+            }
+            Event::ReflectProbe(from, to, context_key) => {
+                let cutoff = i64::from(timed.day) * 86_400_000;
+                let report = memory.reflect_contextual_as_of(from, to, context_key, cutoff)?;
+
+                reflect_probes.push(LifecycleReflectProbe {
+                    day: timed.day,
+                    total_records: report.evidence_quality.total_records,
+                    mixed_context_values: report.mixed_context_values,
+                    review_required: report.review_required,
+                });
+            }
             Event::Probe(anchor, expected) => {
                 let query = [1.0, 0.0];
                 let preview = memory.retrieval_priority_preview(&query, 4)?;
@@ -250,6 +288,7 @@ fn replay_with_mode(events: &[TimedEvent], adaptive: bool) -> Result<(Report, Me
             events: events.len(),
             recorded_uses,
             probes,
+            reflect_probes,
         },
         memory,
     ))
@@ -314,6 +353,26 @@ fn main() -> Result<(), String> {
         );
     }
     println!("Descriptive evidence review; no memory mutation.");
+
+    println!("\nTME Unified Memory Lifecycle v1.1");
+
+    for adaptive in [false, true] {
+        let (report, a, b) = lifecycle_trace(adaptive)?;
+
+        println!(
+            "adaptive={} record_a={:.4} record_b={:.4} uses={}",
+            adaptive, a, b, report.recorded_uses
+        );
+
+        for probe in &report.reflect_probes {
+            println!(
+                "  day={} records={} mixed={:?} review={}",
+                probe.day, probe.total_records, probe.mixed_context_values, probe.review_required
+            );
+        }
+    }
+
+    println!("Chronological snapshots at probe execution; no Sleep.");
     Ok(())
 }
 
@@ -755,5 +814,109 @@ mod conflict_reflect_tests {
             conflict_reflect_trace(40).unwrap(),
             conflict_reflect_trace(40).unwrap()
         );
+    }
+}
+
+// v1.1: Reflect and adaptive events use one chronological dispatcher.
+fn lifecycle_scenario() -> Vec<TimedEvent> {
+    let mut events = unified_scenario();
+
+    events.extend([
+        TimedEvent {
+            day: 10,
+            action: Event::ContextEvidence("client_a", "record_a", true, "normal"),
+        },
+        TimedEvent {
+            day: 20,
+            action: Event::ReflectProbe("client_a", "record_a", "mode"),
+        },
+        TimedEvent {
+            day: 30,
+            action: Event::ContextEvidence("client_a", "record_a", false, "normal"),
+        },
+        TimedEvent {
+            day: 40,
+            action: Event::ReflectProbe("client_a", "record_a", "mode"),
+        },
+        TimedEvent {
+            day: 50,
+            action: Event::ContextEvidence("client_a", "record_a", true, "special"),
+        },
+        TimedEvent {
+            day: 60,
+            action: Event::ReflectProbe("client_a", "record_a", "mode"),
+        },
+    ]);
+
+    events.sort_by_key(|event| event.day);
+    events
+}
+
+fn lifecycle_trace(adaptive: bool) -> Result<(Report, f32, f32), String> {
+    let (report, memory) = replay_with_mode(&lifecycle_scenario(), adaptive)?;
+
+    let a = memory.dynamics("record_a").ok_or("Missing record_a")?;
+    let b = memory.dynamics("record_b").ok_or("Missing record_b")?;
+
+    Ok((report, a.activation, b.activation))
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn reflect_probes_observe_chronological_state() {
+        let (report, _, _) = lifecycle_trace(false).unwrap();
+        assert_eq!(report.reflect_probes.len(), 3);
+
+        assert_eq!(
+            report
+                .reflect_probes
+                .iter()
+                .map(|p| (p.day, p.total_records, p.review_required))
+                .collect::<Vec<_>>(),
+            vec![(20, 2, false), (40, 3, true), (60, 4, true)]
+        );
+
+        assert_eq!(
+            report.reflect_probes[1].mixed_context_values,
+            vec!["normal"]
+        );
+        assert_eq!(
+            report.reflect_probes[2].mixed_context_values,
+            vec!["normal"]
+        );
+    }
+
+    #[test]
+    fn adaptive_and_control_runs_share_evidence_results() {
+        let (control, a, b) = lifecycle_trace(false).unwrap();
+        let (adaptive, aa, ab) = lifecycle_trace(true).unwrap();
+
+        assert_eq!(control.reflect_probes, adaptive.reflect_probes);
+        assert_eq!(control.recorded_uses, adaptive.recorded_uses);
+        assert_eq!(control.probes, adaptive.probes);
+
+        assert!((a - 0.2).abs() < 1e-6);
+        assert!((b - 0.8).abs() < 1e-6);
+        assert!((aa - 0.59).abs() < 1e-6);
+        assert!((ab - 0.495).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lifecycle_replay_is_deterministic() {
+        assert_eq!(
+            lifecycle_trace(true).unwrap(),
+            lifecycle_trace(true).unwrap()
+        );
+    }
+
+    #[test]
+    fn lifecycle_rejects_out_of_order_events() {
+        let mut events = lifecycle_scenario();
+        events.reverse();
+        assert!(replay_with_mode(&events, false).is_err());
+        assert!(replay_with_mode(&events, true).is_err());
     }
 }
