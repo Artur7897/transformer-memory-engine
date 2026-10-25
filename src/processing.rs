@@ -32,6 +32,53 @@ impl Memory {
         self.process_retrieval_filtered(query, anchor, cutoff_unix_ms, None)
     }
 
+    /// Discover directly associated tokens from existing relations.
+    /// No independent identity resolution or evidence verification.
+    pub fn process_retrieval_linked(
+        &self,
+        query: &[f32],
+        anchor: &str,
+        cutoff_unix_ms: i64,
+    ) -> Result<RetrievalDecision, String> {
+        if !self.states.contains_key(anchor) {
+            return Err("Unknown context anchor".into());
+        }
+
+        if query.is_empty() || !query.iter().all(|x| x.is_finite()) {
+            return Err("Query must contain finite numeric values".into());
+        }
+
+        let norm_squared: f64 = query.iter().map(|x| f64::from(*x) * f64::from(*x)).sum();
+
+        if norm_squared == 0.0 {
+            return Err("Query vector must be nonzero".into());
+        }
+
+        let mut ids = BTreeSet::new();
+
+        for relation in self.relations.values() {
+            if relation.from == anchor && relation.weight > 0.0 {
+                if relation.to == anchor {
+                    continue;
+                }
+
+                if !self.states.contains_key(&relation.to) {
+                    return Err("Relation references unknown token".into());
+                }
+
+                ids.insert(relation.to.as_str());
+            }
+        }
+
+        if ids.is_empty() {
+            return Ok(RetrievalDecision::NotFound);
+        }
+
+        let eligible: Vec<&str> = ids.into_iter().collect();
+
+        self.process_retrieval_scoped(query, anchor, cutoff_unix_ms, &eligible)
+    }
+
     /// Restrict retrieval to explicitly eligible existing tokens.
     /// This is query scope, not a stored token type or truth claim.
     pub fn process_retrieval_scoped(
@@ -404,6 +451,79 @@ mod tests {
             RetrievalDecision::Found(candidate)
                 if candidate.token_id == "record_b"
         ));
+    }
+
+    #[test]
+    fn linked_discovery_matches_existing_retrieval() {
+        let mut memory = memory();
+        memory.reinforce("customer", "record_a", 1.0).unwrap();
+        memory.reinforce("customer", "record_b", 1.0).unwrap();
+
+        let original = memory
+            .process_retrieval(&[1.0, 0.0], "customer", 100)
+            .unwrap();
+
+        let discovered = memory
+            .process_retrieval_linked(&[1.0, 0.0], "customer", 100)
+            .unwrap();
+
+        assert_eq!(original, discovered);
+    }
+
+    #[test]
+    fn linked_discovery_finds_unique_association() {
+        let mut memory = memory();
+        memory.reinforce("customer", "record_b", 1.0).unwrap();
+
+        assert!(matches!(
+            memory.process_retrieval_linked(
+                &[1.0, 0.0], "customer", 100
+            ).unwrap(),
+            RetrievalDecision::Found(candidate)
+                if candidate.token_id == "record_b"
+        ));
+    }
+
+    #[test]
+    fn linked_discovery_without_relations_is_not_found() {
+        assert_eq!(
+            memory()
+                .process_retrieval_linked(&[1.0, 0.0], "customer", 100)
+                .unwrap(),
+            RetrievalDecision::NotFound
+        );
+    }
+
+    #[test]
+    fn linked_discovery_rejects_invalid_queries() {
+        let memory = memory();
+
+        assert!(memory
+            .process_retrieval_linked(&[0.0, 0.0], "customer", 100)
+            .is_err());
+
+        assert!(memory
+            .process_retrieval_linked(&[1.0, 0.0], "unknown", 100)
+            .is_err());
+    }
+
+    #[test]
+    fn linked_discovery_is_read_only() {
+        let mut memory = memory();
+        memory.reinforce("customer", "record_a", 1.0).unwrap();
+
+        let before = serde_json::to_value(&memory).unwrap();
+
+        let first = memory
+            .process_retrieval_linked(&[1.0, 0.0], "customer", 100)
+            .unwrap();
+
+        let second = memory
+            .process_retrieval_linked(&[1.0, 0.0], "customer", 100)
+            .unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(before, serde_json::to_value(&memory).unwrap());
     }
 
     #[test]
