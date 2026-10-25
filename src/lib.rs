@@ -15,6 +15,7 @@ pub mod hypotheses;
 pub mod metrics;
 pub mod processing;
 pub mod reflect;
+pub mod reflect_contextual;
 pub mod retention;
 pub mod retention_analysis;
 pub mod retrieval_priority;
