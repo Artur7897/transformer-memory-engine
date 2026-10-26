@@ -75,6 +75,16 @@ impl Memory {
     }
 }
 
+impl ContextualEvidenceRecord {
+    /// Raw execution adjacency is an observation of order,
+    /// not an evaluated transition outcome.
+    pub fn is_execution_adjacency(&self) -> bool {
+        self.context
+            .get("observation_kind")
+            .is_some_and(|kind| kind == "execution_adjacency")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

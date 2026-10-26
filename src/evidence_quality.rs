@@ -52,6 +52,10 @@ impl Memory {
         let mut total_records = 0usize;
 
         for record in self.contextual_evidence.values() {
+            if record.is_execution_adjacency() {
+                continue;
+            }
+
             if record.from != from
                 || record.to != to
                 || record.available_at_unix_ms > cutoff_unix_ms
