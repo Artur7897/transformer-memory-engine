@@ -12,6 +12,8 @@ pub mod evidence_quality;
 pub mod experience;
 pub mod graph_integrity;
 pub mod hypotheses;
+pub mod learning_b;
+pub mod learning_b_weighted;
 pub mod metrics;
 pub mod processing;
 pub mod reflect;
