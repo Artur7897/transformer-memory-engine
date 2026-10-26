@@ -15,6 +15,7 @@ pub mod hypotheses;
 pub mod learning_b;
 pub mod learning_b_bridge;
 pub mod learning_b_events;
+pub mod learning_b_resolution;
 pub mod learning_b_semantic;
 pub mod learning_b_weighted;
 pub mod metrics;
