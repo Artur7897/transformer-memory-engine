@@ -13,6 +13,7 @@ pub mod experience;
 pub mod graph_integrity;
 pub mod hypotheses;
 pub mod learning_b;
+pub mod learning_b_semantic;
 pub mod learning_b_weighted;
 pub mod metrics;
 pub mod processing;
