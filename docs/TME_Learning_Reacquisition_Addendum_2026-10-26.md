@@ -1,6 +1,6 @@
 # TME Architecture Addendum — Orientation, Information Reacquisition and Skill Consolidation
 
-**Date:** 2026-10-26  
+**Date:** 2026-10-26
 **Status:** Conceptual design; not a claim of implemented capability.
 
 ## 1. Generalized information reacquisition

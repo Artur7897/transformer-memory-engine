@@ -1,9 +1,9 @@
 # CHIMERA HYBRID — Learning B Specification v0.2
 
-**Date:** 2026-10-26  
-**Status:** Architecture specification / implementation proposal, **not proof of running skill learning**.  
-**Companion:** `CHIMERA_HYBRID_Architecture_Integration_2026-10-26.md`  
-**Target repository:** `~/dev/transformer-memory-engine`  
+**Date:** 2026-10-26
+**Status:** Architecture specification / implementation proposal, **not proof of running skill learning**.
+**Companion:** `CHIMERA_HYBRID_Architecture_Integration_2026-10-26.md`
+**Target repository:** `~/dev/transformer-memory-engine`
 **Guiding constraint:** Keep the existing Rust Memory A functional; do not create a second persistent copy of the knowledge store.
 
 ## 1. Purpose
