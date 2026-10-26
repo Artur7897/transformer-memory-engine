@@ -13,6 +13,7 @@ pub mod experience;
 pub mod graph_integrity;
 pub mod hypotheses;
 pub mod learning_b;
+pub mod learning_b_admission;
 pub mod learning_b_bridge;
 pub mod learning_b_events;
 pub mod learning_b_resolution;
