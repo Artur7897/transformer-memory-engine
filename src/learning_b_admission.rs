@@ -351,3 +351,203 @@ mod tests {
         ));
     }
 }
+
+/// Result of an explicitly approved token admission.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdmissionCommitReport {
+    pub inserted: Vec<String>,
+    pub reused: Vec<(String, String)>,
+}
+
+impl Memory {
+    /// Commit a previously reviewed admission plan.
+    ///
+    /// All prepared token IDs must be explicitly approved.
+    /// Validate the entire plan before changing Memory A.
+    ///
+    /// This is structural validation, not semantic verification.
+    pub fn learning_b_commit_admission(
+        &mut self,
+        plan: &AdmissionPlan,
+        approved_ids: &[String],
+    ) -> Result<AdmissionCommitReport, String> {
+        let approved: BTreeSet<&str> = approved_ids.iter().map(String::as_str).collect();
+
+        if approved.len() != approved_ids.len() {
+            return Err("Duplicate approval ID".into());
+        }
+
+        let mut seen = BTreeSet::new();
+        let mut prepared = Vec::new();
+        let mut reused = Vec::new();
+
+        // Phase 1: validate the entire plan.
+        for entry in &plan.entries {
+            let id = entry.candidate_id.as_str();
+
+            if id.trim().is_empty() || !seen.insert(id) {
+                return Err("Empty or duplicate candidate ID".into());
+            }
+
+            match &entry.disposition {
+                AdmissionDisposition::Prepared { token } => {
+                    if token.id != id
+                        || self.states.contains_key(id)
+                        || token.vector.is_empty()
+                        || !token.vector.iter().all(|v| v.is_finite())
+                        || !token.vector.iter().any(|v| *v != 0.0)
+                    {
+                        return Err(format!("Invalid prepared token: {id}"));
+                    }
+
+                    if !approved.contains(id) {
+                        return Err(format!("Token not approved: {id}"));
+                    }
+
+                    prepared.push(token.clone());
+                }
+
+                AdmissionDisposition::Reused { existing_id } => {
+                    if !self.states.contains_key(existing_id) {
+                        return Err(format!("Missing reuse target: {existing_id}"));
+                    }
+
+                    if approved.contains(id) {
+                        return Err("Reuse cannot be approved as creation".into());
+                    }
+
+                    reused.push((id.to_owned(), existing_id.clone()));
+                }
+
+                AdmissionDisposition::Deferred | AdmissionDisposition::Rejected { .. } => {
+                    if approved.contains(id) {
+                        return Err("Non-prepared candidate was approved".into());
+                    }
+                }
+            }
+        }
+
+        if approved.iter().any(|id| !seen.contains(*id)) {
+            return Err("Approval references an unknown candidate".into());
+        }
+
+        // Phase 2: stage updates in the affected maps.
+        // Nothing in the live memory changes until staging succeeds.
+        let mut staged_states = self.states.clone();
+        let mut staged_dynamics = self.token_dynamics.clone();
+        let mut inserted = Vec::new();
+
+        for token in prepared {
+            let id = token.id.clone();
+
+            if staged_states.insert(id.clone(), token).is_some() {
+                return Err("Duplicate token during staging".into());
+            }
+
+            staged_dynamics.entry(id.clone()).or_default();
+
+            inserted.push(id);
+        }
+
+        // Phase 3: commit both maps.
+        self.states = staged_states;
+        self.token_dynamics = staged_dynamics;
+
+        Ok(AdmissionCommitReport { inserted, reused })
+    }
+}
+
+#[cfg(test)]
+mod admission_commit_tests {
+    use super::*;
+
+    fn prepared(id: &str, vector: Vec<f32>) -> AdmissionEntry {
+        AdmissionEntry {
+            candidate_id: id.into(),
+            disposition: AdmissionDisposition::Prepared {
+                token: StateToken {
+                    id: id.into(),
+                    vector,
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn commits_approved_token_with_dynamics() {
+        let mut memory = Memory::new();
+
+        let plan = AdmissionPlan {
+            entries: vec![prepared("api.call", vec![1.0, 0.0])],
+        };
+
+        let result = memory
+            .learning_b_commit_admission(&plan, &["api.call".to_owned()])
+            .unwrap();
+
+        assert_eq!(result.inserted, vec!["api.call"]);
+        assert!(memory.states.contains_key("api.call"));
+        assert!(memory.token_dynamics.contains_key("api.call"));
+    }
+
+    #[test]
+    fn rejects_partial_approval_without_mutation() {
+        let mut memory = Memory::new();
+
+        let plan = AdmissionPlan {
+            entries: vec![
+                prepared("api.call", vec![1.0, 0.0]),
+                prepared("response.check", vec![0.0, 1.0]),
+            ],
+        };
+
+        let before = serde_json::to_string(&memory).unwrap();
+
+        assert!(memory
+            .learning_b_commit_admission(&plan, &["api.call".to_owned()],)
+            .is_err());
+
+        assert_eq!(serde_json::to_string(&memory).unwrap(), before);
+    }
+
+    #[test]
+    fn rejects_duplicate_candidates_atomically() {
+        let mut memory = Memory::new();
+
+        let plan = AdmissionPlan {
+            entries: vec![prepared("same", vec![1.0]), prepared("same", vec![0.5])],
+        };
+
+        let before = serde_json::to_string(&memory).unwrap();
+
+        assert!(memory
+            .learning_b_commit_admission(&plan, &["same".to_owned()],)
+            .is_err());
+
+        assert_eq!(serde_json::to_string(&memory).unwrap(), before);
+    }
+
+    #[test]
+    fn refuses_overwrite_of_existing_memory() {
+        let mut memory = Memory::new();
+
+        memory
+            .insert(StateToken {
+                id: "existing".into(),
+                vector: vec![0.2, 0.8],
+            })
+            .unwrap();
+
+        let before = serde_json::to_string(&memory).unwrap();
+
+        let plan = AdmissionPlan {
+            entries: vec![prepared("existing", vec![1.0, 0.0])],
+        };
+
+        assert!(memory
+            .learning_b_commit_admission(&plan, &["existing".to_owned()],)
+            .is_err());
+
+        assert_eq!(serde_json::to_string(&memory).unwrap(), before);
+    }
+}
