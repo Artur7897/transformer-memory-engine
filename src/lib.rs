@@ -30,6 +30,7 @@ pub mod retention;
 pub mod retention_analysis;
 pub mod retrieval_priority;
 pub mod slice;
+pub mod state_container;
 pub mod temporal_dependencies;
 pub mod validation;
 
