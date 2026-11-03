@@ -54,6 +54,7 @@ fn validate_identity(path: &Path, state_id: &str, entity_serial: &str) -> io::Re
 /// The caller must provide a freshly assigned, stable state UUID.
 pub fn create(path: &Path, state_id: &str, entity_serial: &str, memory: &Memory) -> io::Result<()> {
     validate_identity(path, state_id, entity_serial)?;
+    memory.validate_state_metadata().map_err(invalid)?;
 
     let payload = Payload {
         state_id: state_id.to_owned(),
@@ -121,6 +122,7 @@ pub fn load(
 
     payload.memory.prepare_retention_writes().map_err(invalid)?;
     payload.memory.validate_evidence_graph().map_err(invalid)?;
+    payload.memory.validate_state_metadata().map_err(invalid)?;
 
     Ok(payload.memory)
 }
@@ -152,6 +154,7 @@ where
 
     memory.prepare_retention_writes().map_err(invalid)?;
     memory.validate_evidence_graph().map_err(invalid)?;
+    memory.validate_state_metadata().map_err(invalid)?;
 
     // A same-filesystem staging directory lets us reuse create/load
     // while retaining the required <stateId>.tme filename.

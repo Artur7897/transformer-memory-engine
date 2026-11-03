@@ -1,4 +1,5 @@
 pub mod abstraction;
+pub mod adaptive_commit;
 pub mod adaptive_dynamics;
 pub mod compress;
 pub mod consolidation_preview;
@@ -22,16 +23,22 @@ pub mod learning_b_relations;
 pub mod learning_b_resolution;
 pub mod learning_b_semantic;
 pub mod learning_b_weighted;
+pub mod memory_event_pipeline;
 pub mod metrics;
 pub mod processing;
 pub mod reflect;
 pub mod reflect_contextual;
+pub mod relation_dynamics;
 pub mod retention;
 pub mod retention_analysis;
+pub mod retention_dynamics;
 pub mod retrieval_priority;
 pub mod slice;
+pub mod stability_dynamics;
 pub mod state_container;
+pub mod state_metadata_validation;
 pub mod temporal_dependencies;
+pub mod token_architecture;
 pub mod validation;
 
 use serde::{Deserialize, Serialize};
@@ -69,6 +76,14 @@ impl TransitionEvidence {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Memory {
     pub states: BTreeMap<String, StateToken>,
+    #[serde(default)]
+    pub token_kinds: BTreeMap<String, token_architecture::TokenKind>,
+    #[serde(default)]
+    pub token_inertia: BTreeMap<String, token_architecture::TokenInertia>,
+    #[serde(default)]
+    pub relation_inertia: BTreeMap<String, f32>,
+    #[serde(default)]
+    pub retention_estimates: BTreeMap<String, f32>,
     pub relations: BTreeMap<String, Relation>,
     pub cycles: u64,
     #[serde(default)]
