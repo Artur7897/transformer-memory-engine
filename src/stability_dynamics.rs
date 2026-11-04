@@ -28,7 +28,8 @@ impl Memory {
 
         inertia.validate()?;
 
-        let after = inertia_preview(dynamics.stability, target, inertia.stability)?.clamp(0.0, 1.0);
+        let applied_inertia = self.effective_memory_inertia(id, inertia.stability)?;
+        let after = inertia_preview(dynamics.stability, target, applied_inertia)?.clamp(0.0, 1.0);
 
         self.set_token_dynamics(id, dynamics.activation, after)?;
 
@@ -37,7 +38,7 @@ impl Memory {
             before: dynamics.stability,
             target,
             after,
-            inertia: inertia.stability,
+            inertia: applied_inertia,
             memory_changed: after != dynamics.stability,
         })
     }

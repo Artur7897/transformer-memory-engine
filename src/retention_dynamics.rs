@@ -77,6 +77,7 @@ impl Memory {
         let inertia = self.token_inertia(&event.token_id).ok_or("Unknown token")?;
 
         inertia.validate()?;
+        let applied_inertia = self.effective_memory_inertia(&event.token_id, inertia.retention)?;
 
         let previous = self
             .retention_events_for(&event.token_id)
@@ -105,7 +106,7 @@ impl Memory {
 
             let target = before + (goal - before) * policy.adjustment_rate;
 
-            inertia_preview(before, target, inertia.retention)?.clamp(0.0, 1.0)
+            inertia_preview(before, target, applied_inertia)?.clamp(0.0, 1.0)
         } else {
             before
         };
@@ -126,7 +127,7 @@ impl Memory {
             qualified,
             estimate_before: before,
             estimate_after: after,
-            applied_inertia: inertia.retention,
+            applied_inertia,
             memory_changed: after != before,
         })
     }

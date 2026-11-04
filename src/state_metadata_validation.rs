@@ -10,6 +10,14 @@ impl Memory {
     /// This checks structural consistency, not semantic truth.
     /// Legacy states without these maps remain supported.
     pub fn validate_state_metadata(&self) -> Result<(), String> {
+        if !valid_unit(self.memory_l3_inertia_bonus) {
+            return Err("Invalid L3 memory inertia bonus".into());
+        }
+        for id in &self.anchor_tokens {
+            if !self.states.contains_key(id) {
+                return Err(format!("Anchor references unknown token: {id}"));
+            }
+        }
         for id in self.token_kinds.keys() {
             if !self.states.contains_key(id) {
                 return Err(format!("Token kind references unknown token: {id}"));
@@ -50,6 +58,42 @@ impl Memory {
             }
             if !self.relations.contains_key(key) {
                 return Err(format!("Inertia references unknown relation: {key}"));
+            }
+        }
+
+        // Acquired context is part of the persisted state: reject dangling
+        // token references and invalid embeddings on load and update.
+        for (key, session) in &self.acquisition_sessions {
+            if session.id != *key || !self.states.contains_key(&session.anchor)
+                || session.max_depth == 0 || session.max_depth > 8
+                || session.batch_size == 0 || session.batch_size > 20
+                || session.rounds == 0 || session.rounds > 64
+                || session.query_vector.is_empty()
+                || !session.query_vector.iter().all(|v| v.is_finite())
+                || !session.query_vector.iter().any(|v| *v != 0.0)
+                || session.seen.iter().any(|id| !self.states.contains_key(id))
+                || session.external_hints.iter().any(|hint|
+                    hint.source_reference.trim().is_empty()
+                    || hint.reason.trim().is_empty()
+                    || hint.source_reference.len() > 512
+                    || hint.reason.len() > 512)
+            {
+                return Err(format!("Invalid acquisition session: {key}"));
+            }
+        }
+        for (key, record) in &self.abstraction_records {
+            if key != &record.abstract_token_id
+                || !self.states.contains_key(&record.abstract_token_id)
+                || !self.states.contains_key(&record.abstract_anchor_id)
+                || record.review_reference.trim().is_empty()
+                || (!record.review_digest.is_empty() &&
+                    (record.review_digest.len() != 64 ||
+                     !record.review_digest.bytes().all(|b| b.is_ascii_hexdigit())))
+                || record.source_token_ids.len() < 2
+                || record.source_token_ids.len() != record.original_sources.len()
+                || record.source_token_ids.iter().any(|id| !self.states.contains_key(id))
+            {
+                return Err(format!("Invalid abstraction record: {key}"));
             }
         }
 
@@ -188,4 +232,12 @@ mod tests {
 
         assert!(m.validate_state_metadata().is_err());
     }
+    #[test]
+    fn invalid_persisted_acquisition_reference_is_rejected() {
+        let mut m = fixture();
+        m.acquisition_session_start("s", "a", vec![1.0, 0.0], 3, 2).unwrap();
+        m.acquisition_sessions.get_mut("s").unwrap().seen.insert("ghost".into());
+        assert!(m.validate_state_metadata().is_err());
+    }
+
 }

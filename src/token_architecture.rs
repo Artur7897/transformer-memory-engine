@@ -62,6 +62,22 @@ pub fn inertia_preview(current: f32, target: f32, inertia: f32) -> Result<f32, S
 }
 
 impl Memory {
+    /// The anchor flag is independent of TokenKind and of memory levels.
+    pub fn is_anchor(&self, id: &str) -> Option<bool> {
+        self.states.get(id).map(|_| self.anchor_tokens.contains(id))
+    }
+
+    pub fn set_anchor(&mut self, id: &str, anchor: bool) -> Result<(), String> {
+        if !self.states.contains_key(id) {
+            return Err("Unknown token".into());
+        }
+        if anchor {
+            self.anchor_tokens.insert(id.to_owned());
+        } else {
+            self.anchor_tokens.remove(id);
+        }
+        Ok(())
+    }
     pub fn token_kind(&self, id: &str) -> Option<TokenKind> {
         if !self.states.contains_key(id) {
             return None;

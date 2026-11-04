@@ -1,4 +1,11 @@
 pub mod abstraction;
+pub mod acquisition;
+pub mod acquisition_session;
+pub mod external_acquisition;
+pub mod workflow;
+pub mod lifecycle;
+pub mod maintenance;
+pub mod text_abstraction;
 pub mod adaptive_commit;
 pub mod adaptive_dynamics;
 pub mod compress;
@@ -24,6 +31,7 @@ pub mod learning_b_resolution;
 pub mod learning_b_semantic;
 pub mod learning_b_weighted;
 pub mod memory_event_pipeline;
+pub mod memory_levels;
 pub mod metrics;
 pub mod processing;
 pub mod reflect;
@@ -38,6 +46,7 @@ pub mod stability_dynamics;
 pub mod state_container;
 pub mod state_metadata_validation;
 pub mod temporal_dependencies;
+pub mod text_ingestion;
 pub mod token_architecture;
 pub mod validation;
 
@@ -77,9 +86,24 @@ impl TransitionEvidence {
 pub struct Memory {
     pub states: BTreeMap<String, StateToken>,
     #[serde(default)]
+    pub acquisition_sessions: BTreeMap<String, acquisition_session::AcquisitionSession>,
+    #[serde(default)]
+    pub lifecycle: lifecycle::TmeLifecycle,
+    #[serde(default)]
+    pub abstraction_records: BTreeMap<String, text_abstraction::TextAbstractionRecord>,
+    /// Text attached to Memory tokens. Default preserves old .tme files.
+    #[serde(default)]
+    pub text_memories: BTreeMap<String, text_ingestion::TextMemoryEntry>,
+    #[serde(default)]
     pub token_kinds: BTreeMap<String, token_architecture::TokenKind>,
     #[serde(default)]
     pub token_inertia: BTreeMap<String, token_architecture::TokenInertia>,
+    /// Independent anchor property; TokenKind remains unchanged.
+    #[serde(default)]
+    pub anchor_tokens: BTreeSet<String>,
+    /// Additional L3 inertia, 0.0 by default for backward compatibility.
+    #[serde(default)]
+    pub memory_l3_inertia_bonus: f32,
     #[serde(default)]
     pub relation_inertia: BTreeMap<String, f32>,
     #[serde(default)]
